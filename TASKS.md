@@ -51,8 +51,8 @@
 - [x] Implement `app/L2_guardrails/injection_sentinel.py` — prompt injection classifier — commit 7289983 (ADR-0007 hybrid regex+LLM; regex-first with 10 anchored patterns, suspicion-keyword-gated Fast-tier LLM fallback via injected classifier; classifier reuses gate-wrapped router — no recursion, no redactor bypass of raw content; defensive `phi_present=True` on classifier calls; fail-open on classifier error; `SENTINEL_MODE=block|flag|off` env; `InjectionSentinelError` → HTTP 400; runtime stack now `InjectionSentinel(PHIRedactor(BAAGateGuard(TieredAIGateway)), classifier=BAAGateGuard(TieredAIGateway))`; 46 new unit tests; 96/96 unit tests green)
 - [ ] Implement `app/L3_agents/compliance_ops/` — Founder Mode digest agent (UX spec'd in ADR-0008: fixed 5-section structure, 300-word cap, evidence-only synthesis, JSON schema in prompt, admin UI + file persistence, apscheduler 06:30 local, email deferred to Phase 3; ready to implement)
 - [ ] Data sources for digest: docker stats, Postgres audit table, fake `hardening_status.json`
-- [ ] Prompt: registered in YAML at `app/L0_observability/prompts/compliance_ops_digest.yaml`
-- [ ] Prompt registry table + insert on startup
+- [ ] Prompt: registered in YAML at `app/L0_observability/prompts/compliance_ops_digest.yaml` (schema spec'd in ADR-0009 §3)
+- [ ] Prompt registry — Phase 2 `FileBackedPromptRegistry` per ADR-0009 (YAML-first + JSON state snapshot + content-hash versioning + drift log). Postgres runtime table deferred to Phase 3 as time-boxed rule-6 relaxation.
 - [ ] Cron job: daily digest at 06:30
 - [ ] Simple digest page in Admin UI
 - [ ] Test: full flow from cron trigger → LLM → digest email/UI

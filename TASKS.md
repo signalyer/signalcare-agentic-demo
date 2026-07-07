@@ -1,6 +1,6 @@
 # SignalCare Agentic Demo — Task Ledger
 
-> Last reconciled: 2026-07-07 (Phase 2 task 1 landed — L2 BAA gate middleware live at commit d02b92a; ADR-0005 wrap-the-router rationale)
+> Last reconciled: 2026-07-07 (Phase 2 task 2 landed — L2 PHI redactor + BAA gate conditional retrofit at commit 7d104ba; ADR-0006 phi_present coupling contract)
 > Format: Phase-grouped (see global CLAUDE.md `PROJECT-TASKS.md` template)
 > Status: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked
 
@@ -46,8 +46,8 @@
 
 ## Phase 2 — Week 2: L1 API + L2 Guardrails + Agent #8 Compliance/Ops (Founder Mode)
 
-- [x] Implement `app/L2_guardrails/baa_gate.py` — real middleware that blocks PHI-bearing calls to unapproved endpoints — commit d02b92a (ADR-0005 wrap-the-router; 12 new unit tests, 25/25 green)
-- [ ] Implement `app/L2_guardrails/phi_redactor.py` — T1-T4 tiered redaction
+- [x] Implement `app/L2_guardrails/baa_gate.py` — real middleware that blocks PHI-bearing calls to unapproved endpoints — commit d02b92a (ADR-0005 wrap-the-router), retrofitted to phi_present-conditional in commit 7d104ba (ADR-0006)
+- [x] Implement `app/L2_guardrails/phi_redactor.py` — T1-T4 tiered redaction — commit 7d104ba (regex-based; Presidio swap-in noted; 22 new unit tests; runtime stack now `PHIRedactor(BAAGateGuard(TieredAIGateway))`; 50/50 unit tests green)
 - [ ] Implement `app/L2_guardrails/injection_sentinel.py` — prompt injection classifier
 - [ ] Implement `app/L3_agents/compliance_ops/` — Founder Mode digest agent
 - [ ] Data sources for digest: docker stats, Postgres audit table, fake `hardening_status.json`

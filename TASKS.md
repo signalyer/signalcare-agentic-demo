@@ -1,6 +1,6 @@
 # SignalCare Agentic Demo — Task Ledger
 
-> Last reconciled: 2026-07-07 (Phase 1 kickoff — see ADR-0003 for docker deferral)
+> Last reconciled: 2026-07-07 (Phase 1 core landed — commit 7c61907; see ADR-0003 for docker deferral)
 > Format: Phase-grouped (see global CLAUDE.md `PROJECT-TASKS.md` template)
 > Status: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked
 
@@ -17,7 +17,7 @@
 - [x] Write `infra/postgres/init.sql` + `infra/ollama/models.txt`
 - [x] Write L3 agents README + L6 adapters README (conventions)
 - [x] Author handoff file `docs/handoffs/2026-07-07-scaffold-to-week1.md`
-- [ ] `git init` and initial commit (user action)
+- [x] `git init` and initial commit (root-commit `7c61907`, 2026-07-07)
 - [x] ~~Confirm docker-compose stack comes up cleanly~~ → **deferred to Phase 3 via ADR-0003** (no container runtime on Week 1 host machine; native Ollama covers Week 1 needs)
 
 ---
@@ -27,16 +27,19 @@
 **Note (ADR-0003):** Docker-compose stack bring-up moved to Phase 3. Week 1 uses **native Ollama on Windows** (`http://localhost:11434`) + OpenRouter (hosted). Everything else in the compose stack is not on the Week 1 code path.
 
 - [~] Install native Ollama on Windows + pull `llama3.2:3b` (user action; ~10 min)
-- [ ] Implement `app/L6_adapters/ai_gateway/base.py` interface (abstract methods: `complete`, `stream`)
-- [ ] Implement `app/L6_adapters/ai_gateway/local.py` — Ollama concrete
-- [ ] Implement `app/L6_adapters/ai_gateway/openrouter.py` — OpenRouter concrete (routes to Claude/GPT via OpenAI-compatible API)
-- [ ] Wire tier-based routing in `app/L6_adapters/ai_gateway/router.py` (Fast → Ollama, Balanced/Reasoning → OpenRouter)
-- [ ] Add `/agents/echo` endpoint in FastAPI `main.py` (accepts `tier` + `prompt`, returns text + model + provider + latency + token counts)
-- [ ] Hello-world agent call: prove both Ollama and Claude/GPT work through the adapter (`curl` and pytest integration test)
-- [ ] Unit tests: `tests/unit/test_ai_gateway.py` — interface contract + router picks correctly (offline, no live providers)
-- [ ] Integration tests: `tests/integration/test_ai_gateway_live.py` — real Ollama + real OpenRouter (auto-skip if unavailable)
-- [ ] Add `make status-lite` target (native Ollama ping + OpenRouter reachability check) to unblock local verification without docker
+- [x] Implement `app/L6_adapters/ai_gateway/base.py` interface (`complete`, `stream`) — commit 7c61907
+- [x] Implement `app/L6_adapters/ai_gateway/local.py` — Ollama concrete — commit 7c61907
+- [x] Implement `app/L6_adapters/ai_gateway/openrouter.py` — OpenRouter concrete (via OpenAI-compatible client) — commit 7c61907
+- [x] Wire tier-based routing in `app/L6_adapters/ai_gateway/router.py` (Fast → Ollama, Balanced/Reasoning → OpenRouter) — commit 7c61907
+- [x] Add `/agents/echo` endpoint in FastAPI `main.py` (accepts `tier` + `prompt`, returns text + model + provider + latency + token counts) — commit 7c61907
+- [~] Hello-world agent call: prove both Ollama and Claude/GPT work through the adapter — **code done, live verify pending Ollama install (blocked on user)**
+- [x] Unit tests `tests/unit/test_ai_gateway.py` — 12/12 passing offline — commit 7c61907
+- [x] Integration tests `tests/integration/test_ai_gateway_live.py` — skip-guarded, includes the ADR-0002 proof-point (same interface, two providers) — commit 7c61907
+- [x] Add `make status-lite` target (native Ollama ping + OpenRouter reachability check) — commit 7c61907
 - [~] ~~Grafana dashboard #1: request rate, latency, model breakdown~~ → **moved to Phase 3** (batched with the other three dashboards; interim visibility via `structlog` stdout)
+
+### Open design point surfaced this session (needs Prav's call before Phase 2)
+- [ ] Env loading path: bare `os.getenv` + `uvicorn --env-file` **(A, recommended for Week 1)** vs centralised `pydantic-settings` Settings loaded once at startup **(B, better fit for Phase 3 when Postgres/NATS/Vault creds land)**. Currently A is in effect implicitly (no `load_dotenv` call); either A must be documented in README or B implemented before Phase 3 credentials wiring.
 
 ## Phase 2 — Week 2: L1 API + L2 Guardrails + Agent #8 Compliance/Ops (Founder Mode)
 

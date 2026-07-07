@@ -1,6 +1,6 @@
 # SignalCare Agentic Demo — Task Ledger
 
-> Last reconciled: 2026-07-07 (Phase 2 task 2 landed — L2 PHI redactor + BAA gate conditional retrofit at commit 7d104ba; ADR-0006 phi_present coupling contract)
+> Last reconciled: 2026-07-07 (Phase 2 task 3 landed — L2 injection sentinel at commit 7289983; ADR-0007 hybrid regex+LLM detection, outermost L2 wrap, fail-open classifier, 46 new unit tests)
 > Format: Phase-grouped (see global CLAUDE.md `PROJECT-TASKS.md` template)
 > Status: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked
 
@@ -48,7 +48,7 @@
 
 - [x] Implement `app/L2_guardrails/baa_gate.py` — real middleware that blocks PHI-bearing calls to unapproved endpoints — commit d02b92a (ADR-0005 wrap-the-router), retrofitted to phi_present-conditional in commit 7d104ba (ADR-0006)
 - [x] Implement `app/L2_guardrails/phi_redactor.py` — T1-T4 tiered redaction — commit 7d104ba (regex-based; Presidio swap-in noted; 22 new unit tests; runtime stack now `PHIRedactor(BAAGateGuard(TieredAIGateway))`; 50/50 unit tests green)
-- [ ] Implement `app/L2_guardrails/injection_sentinel.py` — prompt injection classifier
+- [x] Implement `app/L2_guardrails/injection_sentinel.py` — prompt injection classifier — commit 7289983 (ADR-0007 hybrid regex+LLM; regex-first with 10 anchored patterns, suspicion-keyword-gated Fast-tier LLM fallback via injected classifier; classifier reuses gate-wrapped router — no recursion, no redactor bypass of raw content; defensive `phi_present=True` on classifier calls; fail-open on classifier error; `SENTINEL_MODE=block|flag|off` env; `InjectionSentinelError` → HTTP 400; runtime stack now `InjectionSentinel(PHIRedactor(BAAGateGuard(TieredAIGateway)), classifier=BAAGateGuard(TieredAIGateway))`; 46 new unit tests; 96/96 unit tests green)
 - [ ] Implement `app/L3_agents/compliance_ops/` — Founder Mode digest agent
 - [ ] Data sources for digest: docker stats, Postgres audit table, fake `hardening_status.json`
 - [ ] Prompt: registered in YAML at `app/L0_observability/prompts/compliance_ops_digest.yaml`

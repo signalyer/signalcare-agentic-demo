@@ -65,11 +65,21 @@ class _FakeRouter(AIGateway):
         self.closed = True
 
 
-def _req(tier: Tier = Tier.BALANCED, trace: str = "tr-baa") -> CompletionRequest:
+def _req(
+    tier: Tier = Tier.BALANCED,
+    trace: str = "tr-baa",
+    *,
+    phi_present: bool = False,
+    phi_tier: str | None = None,
+) -> CompletionRequest:
+    """Build a CompletionRequest. Default is no-PHI; denial-path tests pass
+    ``phi_present=True`` since the gate is conditional on it (ADR-0006)."""
     return CompletionRequest(
         tier=tier,
         messages=[Message(role="user", content="ping")],
         trace_id=trace,
+        phi_present=phi_present,
+        phi_tier=phi_tier,
     )
 
 
@@ -110,7 +120,11 @@ class TestAllow:
 
 
 class TestDeny:
-    async def test_unapproved_vendor_raises_typed_error(self):
+    """Denial-path tests. All requests have ``phi_present=True`` — the gate is
+    conditional on the flag per ADR-0006, so a no-PHI call to an unapproved
+    vendor is allowed by design (see ``TestConditional`` below)."""
+
+    async def test_unapproved_vendor_with_phi_raises_typed_error(self):
         router = _FakeRouter(vendor="rogue-cloud")
         guard = BAAGateGuard(
             router,
@@ -118,7 +132,7 @@ class TestDeny:
             approved_vendors=frozenset({"anthropic", "ollama"}),
         )
         with pytest.raises(BAAGateError) as exc_info:
-            await guard.complete(_req())
+            await guard.complete(_req(phi_present=True, phi_tier="T1"))
         assert exc_info.value.vendor == "rogue-cloud"
         # Router.complete must NOT have been called on a denial.
         assert len(router.complete_calls) == 0
@@ -131,7 +145,7 @@ class TestDeny:
             approved_vendors=frozenset({"anthropic"}),
         )
         with pytest.raises(BAAGateError) as exc_info:
-            await guard.complete(_req(trace="tr-XYZ"))
+            await guard.complete(_req(trace="tr-XYZ", phi_present=True, phi_tier="T2"))
         assert exc_info.value.trace_id == "tr-XYZ"
 
     async def test_baa_gate_error_is_not_ai_gateway_error(self):
@@ -140,7 +154,7 @@ class TestDeny:
 
         assert not issubclass(BAAGateError, AIGatewayError)
 
-    async def test_empty_allow_list_denies_everything(self):
+    async def test_empty_allow_list_denies_phi_calls(self):
         router = _FakeRouter(vendor="anthropic")
         guard = BAAGateGuard(
             router,
@@ -148,7 +162,7 @@ class TestDeny:
             approved_vendors=frozenset(),
         )
         with pytest.raises(BAAGateError):
-            await guard.complete(_req())
+            await guard.complete(_req(phi_present=True, phi_tier="T1"))
 
     async def test_stream_is_gated_before_bytes_leave(self):
         router = _FakeRouter(vendor="rogue-cloud")
@@ -160,9 +174,49 @@ class TestDeny:
         with pytest.raises(BAAGateError):
             # Consuming even one chunk must raise — the guard enforces before opening
             # the upstream stream.
-            async for _ in guard.stream(_req()):
+            async for _ in guard.stream(_req(phi_present=True, phi_tier="T1")):
                 pytest.fail("stream yielded a chunk on a denied call")
         assert len(router.stream_calls) == 0
+
+
+class TestConditional:
+    """The phi_present coupling with the redactor (ADR-0006). A no-PHI call is
+    forwarded regardless of vendor approval; PHI requires an approved vendor."""
+
+    async def test_no_phi_allows_unapproved_vendor(self):
+        # This is the build-plan's implicit permissive path — a non-PHI call
+        # goes to any vendor without gate interference.
+        router = _FakeRouter(vendor="some-random-vendor")
+        guard = BAAGateGuard(
+            router,
+            require_baa=True,
+            approved_vendors=frozenset({"anthropic"}),
+        )
+        resp = await guard.complete(_req(phi_present=False))
+        assert resp.provider == "some-random-vendor"
+        assert len(router.complete_calls) == 1
+
+    async def test_phi_true_and_unapproved_blocks(self):
+        # build-plan line 34: "BAA gate blocks a request with phi_present=True
+        # and unapproved vendor." The canonical block-path.
+        router = _FakeRouter(vendor="rogue-cloud")
+        guard = BAAGateGuard(
+            router,
+            require_baa=True,
+            approved_vendors=frozenset({"anthropic", "ollama"}),
+        )
+        with pytest.raises(BAAGateError):
+            await guard.complete(_req(phi_present=True, phi_tier="T1"))
+
+    async def test_phi_true_and_approved_forwards(self):
+        router = _FakeRouter(vendor="anthropic")
+        guard = BAAGateGuard(
+            router,
+            require_baa=True,
+            approved_vendors=frozenset({"anthropic", "ollama"}),
+        )
+        resp = await guard.complete(_req(phi_present=True, phi_tier="T2"))
+        assert resp.provider == "anthropic"
 
 
 class TestDelegation:

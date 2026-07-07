@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from L2_guardrails import BAAGateError, BAAGateGuard
+from L2_guardrails import BAAGateError, BAAGateGuard, PHIRedactor
 from L6_adapters.ai_gateway import (
     AIGateway,
     AIGatewayError,
@@ -34,14 +34,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 async def lifespan(app: FastAPI):
     """Startup and shutdown hooks — initialize adapters, tear them down cleanly."""
     logger.info("SignalCare Agentic Demo starting")
-    # L6: build the concrete AI Gateway router (see ADR-0003, ADR-0004).
+    # L6: concrete AI Gateway router (see ADR-0003, ADR-0004).
     tiered = TieredAIGateway()
-    # L2: wrap in the BAA gate — every LLM call must pass through it (rule 3).
-    # ADR-0005: guard wraps the router, not individual adapters. Future L2 guardrails
-    # (PHI redactor, injection sentinel) will compose over this to form the stack
-    # `Redactor(Sentinel(BAAGate(Router)))`.
-    app.state.ai_gateway = BAAGateGuard(tiered)
-    # TODO Week 2: add PHI redactor + injection sentinel to the L2 stack
+    # L2: BAA gate — reads phi_present, blocks unapproved-vendor + PHI (rule 3).
+    # ADR-0005: guard wraps the router, not individual adapters.
+    gated = BAAGateGuard(tiered)
+    # L2: PHI redactor — scans content, tags phi_present + phi_tier, redacts per
+    # REDACTION_MODE. Outermost so it runs FIRST and produces the flag the gate
+    # then consults (ADR-0006). Injection sentinel will slot outside this later.
+    app.state.ai_gateway = PHIRedactor(gated)
+    # TODO Week 2: add injection sentinel outside PHIRedactor
     # TODO Week 3: initialize identity/relational/object/event/secrets/telemetry adapters
     # TODO Week 3: start L4 orchestrator background workers
     # TODO Week 2: seed prompt registry from YAML sources

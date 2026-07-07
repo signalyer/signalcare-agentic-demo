@@ -1,15 +1,33 @@
-"""BAA (Business Associate Agreement) gate — middleware that blocks LLM calls to
-vendors not on the ``APPROVED_PHI_VENDORS`` allow-list.
+"""BAA (Business Associate Agreement) gate — middleware that blocks LLM calls
+carrying PHI to vendors not on the ``APPROVED_PHI_VENDORS`` allow-list.
 
 This is the first L2 guardrail and the load-bearing enforcement point for
 ``CLAUDE.md`` non-negotiable rule 3: *"BAA gate is real middleware. Every LLM call
 passes through ``app/L2_guardrails/baa_gate.py``. No exceptions."*
 
 The gate is a decorator over ``TieredAIGateway`` — see ADR-0005 for the
-wrap-the-router-not-the-adapters rationale. ``BAAGateGuard`` itself implements
-``AIGateway``, so upstream callers (``main.py``, future L3 agents, orchestrator)
-still interact with a single ``AIGateway`` type. The guard is invisible until it
-fires.
+wrap-the-router-not-the-adapters rationale, and ADR-0006 for the ordering
+against the PHI redactor. ``BAAGateGuard`` itself implements ``AIGateway``, so
+upstream callers still interact with a single ``AIGateway`` type. The guard is
+invisible until it fires.
+
+Enforcement rule
+----------------
+When ``REQUIRE_BAA=true`` (the default) the gate:
+
+- Forwards freely if ``req.phi_present is False`` — no PHI claimed, any vendor OK.
+- Forwards if ``req.phi_present is True`` AND the vendor is in
+  ``APPROVED_PHI_VENDORS`` — approved recipient, PHI OK.
+- Denies (``BAAGateError``) if ``req.phi_present is True`` AND the vendor is NOT
+  in the allow-list — the block-path build-plan line 34 requires.
+
+``phi_present`` is set by the ``PHIRedactor`` L2 guardrail (see
+``phi_redactor.py``). If no redactor runs (e.g., a caller bypasses the stack),
+``phi_present`` defaults to ``False`` — the gate then allows. That is a
+deliberate defense-in-depth default: the gate never *accidentally* strengthens
+enforcement over a caller's stated intent. Every ``CompletionRequest`` should
+flow through the redactor first; the whole-stack composition in ``main.py``
+ensures it does.
 
 Denial surface
 --------------
@@ -125,18 +143,32 @@ class BAAGateGuard(AIGateway):
         if not self._require_baa:
             return
         vendor = self._inner.vendor_for(req.tier).lower()
-        if vendor in self._approved:
+        # Non-PHI calls flow to any vendor. The redactor (or absence of one) is
+        # the source of truth for phi_present; the gate does not re-classify.
+        if not req.phi_present:
             _logger.info(
-                "baa_gate_decision decision=allow vendor=%s tier=%s trace_id=%s",
+                "baa_gate_decision decision=allow reason=no_phi vendor=%s tier=%s trace_id=%s",
                 vendor,
                 req.tier.value,
                 req.trace_id,
             )
             return
+        if vendor in self._approved:
+            _logger.info(
+                "baa_gate_decision decision=allow reason=vendor_approved "
+                "vendor=%s tier=%s phi_tier=%s trace_id=%s",
+                vendor,
+                req.tier.value,
+                req.phi_tier,
+                req.trace_id,
+            )
+            return
         _logger.warning(
-            "baa_gate_decision decision=deny vendor=%s tier=%s trace_id=%s",
+            "baa_gate_decision decision=deny reason=unapproved_vendor_with_phi "
+            "vendor=%s tier=%s phi_tier=%s trace_id=%s",
             vendor,
             req.tier.value,
+            req.phi_tier,
             req.trace_id,
         )
         raise BAAGateError(vendor, req.trace_id)

@@ -44,6 +44,14 @@ class CompletionRequest:
     """Everything an adapter needs to produce a completion.
 
     Callers set `tier` — providers are chosen by `router.py`, never by the caller.
+
+    ``phi_present`` / ``phi_tier`` are set by the L2 PHI redactor guardrail (see
+    ``app/L2_guardrails/phi_redactor.py``) via ``dataclasses.replace``. Downstream
+    guardrails — specifically the BAA gate — consult ``phi_present`` to decide
+    allow/deny. Callers upstream of the redactor leave both fields at defaults;
+    callers that bypass the redactor stay at defaults, which is semantically
+    "no PHI claimed" — a defense-in-depth default that never accidentally
+    weakens enforcement. See ADR-0006.
     """
 
     tier: Tier
@@ -51,6 +59,8 @@ class CompletionRequest:
     max_tokens: int = 1024
     temperature: float = 0.2
     trace_id: str | None = None
+    phi_present: bool = False
+    phi_tier: str | None = None  # "T1" | "T2" | "T3" | "T4" | None
 
 
 @dataclass(frozen=True)

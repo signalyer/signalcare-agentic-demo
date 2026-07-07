@@ -1,0 +1,77 @@
+[project]
+name = "signalcare-agentic-demo"
+version = "0.1.0"
+description = "Standalone cloud-agnostic agentic architecture demo for SignalCare EDWP"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+
+    # L6 Adapters
+    "asyncpg>=0.30",
+    "psycopg[binary,pool]>=3.2",
+    "pgvector>=0.3",
+    "boto3>=1.35",           # for MinIO (S3-compatible); confined to L6/object_store
+    "nats-py>=2.9",
+    "hvac>=2.3",             # HashiCorp Vault client
+    "python-keycloak>=4.6",
+
+    # LLM + tools
+    "anthropic>=0.40",
+    "ollama>=0.4",
+    "openai>=1.60",          # OpenRouter uses OpenAI-compatible interface
+    "httpx>=0.27",
+
+    # Evidence + OCR
+    "pytesseract>=0.3.13",
+    "pypdf>=5.1",
+    "pillow>=11.0",
+    # "docling>=1.0",        # add when needed
+
+    # RAG
+    "rank-bm25>=0.2.2",
+    "sentence-transformers>=3.3",
+
+    # Observability
+    "opentelemetry-api>=1.28",
+    "opentelemetry-sdk>=1.28",
+    "opentelemetry-exporter-otlp>=1.28",
+    "opentelemetry-instrumentation-fastapi>=0.49b0",
+    "opentelemetry-instrumentation-httpx>=0.49b0",
+    "opentelemetry-instrumentation-asyncpg>=0.49b0",
+    "prometheus-client>=0.21",
+    "structlog>=24.4",
+
+    # Utils
+    "python-multipart>=0.0.20",
+    "pyyaml>=6.0",
+    "faker>=33.0",           # synthetic data generation
+    "cryptography>=44.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "testcontainers>=4.9",
+    "httpx>=0.27",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Real pytest config lives at repo-root `pytest.ini` — tests are outside this package.
+# This block is kept for local `uv run pytest` invocations that pick up only pyproject.
+

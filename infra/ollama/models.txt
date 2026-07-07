@@ -1,0 +1,11 @@
+# Ollama models to pull before running the demo.
+# Run `make pull-models` or manually: docker exec sc-ollama ollama pull <model>
+
+# Fast tier — runs on CPU or modest GPU
+llama3.2:3b
+
+# Balanced tier (optional) — needs ~16GB VRAM
+# qwen2.5:14b
+
+# Reasoning tier is served via OpenRouter (Claude Opus / GPT-5)
+# — not pulled locally to avoid 40GB+ download.

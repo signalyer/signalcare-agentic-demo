@@ -60,6 +60,16 @@ class TieredAIGateway(AIGateway):
             return self._hosted
         raise AIGatewayError(f"No adapter for tier: {tier}")
 
+    def vendor_for(self, tier: Tier) -> str:
+        """Return the ``provider_name`` of the concrete adapter that would serve ``tier``.
+
+        Used by ``L2_guardrails.baa_gate.BAAGateGuard`` to make the vendor identity
+        available *before* the call is dispatched — so the guard can allow/deny based
+        on ``APPROVED_PHI_VENDORS`` without needing to know the tier-to-adapter mapping
+        itself. See ADR-0005.
+        """
+        return getattr(self._pick(tier), "provider_name", "unknown")
+
     async def close(self) -> None:
         # Close both — either may hold connection pools.
         await self._local.close()

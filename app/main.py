@@ -13,9 +13,12 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from L2_guardrails import BAAGateError, BAAGateGuard
 from L6_adapters.ai_gateway import (
+    AIGateway,
     AIGatewayError,
     CompletionRequest,
     Message,
@@ -31,10 +34,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 async def lifespan(app: FastAPI):
     """Startup and shutdown hooks — initialize adapters, tear them down cleanly."""
     logger.info("SignalCare Agentic Demo starting")
-    # AI Gateway is the only Week 1 adapter (see ADR-0003).
-    # Construction can fail if OPENROUTER_API_KEY is missing — surface loudly at startup.
-    app.state.ai_gateway = TieredAIGateway()
-    # TODO Week 2: initialize L2 guardrails (BAA gate, PHI redactor, injection sentinel)
+    # L6: build the concrete AI Gateway router (see ADR-0003, ADR-0004).
+    tiered = TieredAIGateway()
+    # L2: wrap in the BAA gate — every LLM call must pass through it (rule 3).
+    # ADR-0005: guard wraps the router, not individual adapters. Future L2 guardrails
+    # (PHI redactor, injection sentinel) will compose over this to form the stack
+    # `Redactor(Sentinel(BAAGate(Router)))`.
+    app.state.ai_gateway = BAAGateGuard(tiered)
+    # TODO Week 2: add PHI redactor + injection sentinel to the L2 stack
     # TODO Week 3: initialize identity/relational/object/event/secrets/telemetry adapters
     # TODO Week 3: start L4 orchestrator background workers
     # TODO Week 2: seed prompt registry from YAML sources
@@ -58,10 +65,38 @@ app.add_middleware(
 )
 
 
-# TODO Week 2: attach L2 guardrail middleware here (BAA gate, injection sentinel, redactor)
+# TODO Week 2: add PHI redactor + injection sentinel to the L2 middleware stack
 # TODO Week 3: attach OpenTelemetry instrumentation
 # TODO Week 3: mount L1 review UX routers
 # TODO Week 4-7: mount agent routers
+
+
+@app.exception_handler(BAAGateError)
+async def baa_gate_error_handler(request: Request, exc: BAAGateError) -> JSONResponse:
+    """Map BAA gate denials to HTTP 451 (Unavailable For Legal Reasons, RFC 7725).
+
+    Distinct from AIGatewayError (502) — a BAA denial is a policy decision the caller
+    must never bypass, whereas an AIGatewayError is a transient issue callers may
+    retry. See ADR-0005.
+    """
+    logger.warning(
+        "baa_gate_blocked vendor=%s trace_id=%s path=%s",
+        exc.vendor,
+        exc.trace_id,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=451,
+        content={
+            "error": "BAA required",
+            "detail": (
+                f"Vendor '{exc.vendor}' is not in APPROVED_PHI_VENDORS. Request "
+                "blocked by L2 BAA gate."
+            ),
+            "vendor": exc.vendor,
+            "trace_id": exc.trace_id,
+        },
+    )
 
 
 @app.get("/health")
@@ -97,18 +132,20 @@ async def root() -> dict:
 # ---------------------------------------------------------------------------
 # /agents/echo — Week 1 hello-world proof-of-work for the AI Gateway adapter.
 #
-# Given a tier and a prompt, dispatches through the TieredAIGateway to either
-# Ollama (Fast) or OpenRouter (Balanced/Reasoning) and returns the response
-# with provider + model + latency + token counts. The caller never learns
-# which concrete adapter served the request other than via the reported
-# metadata — which is exactly the abstraction claim from ADR-0002.
+# Given a tier and a prompt, dispatches through the L2-guarded AI Gateway
+# (BAAGateGuard wrapping TieredAIGateway) to either Ollama (Fast) or Anthropic
+# (Balanced/Reasoning per ADR-0004) and returns the response with provider +
+# model + latency + token counts. The caller never learns which concrete
+# adapter served the request other than via the reported metadata — which is
+# exactly the abstraction claim from ADR-0002. If BAA policy denies the vendor,
+# the guard raises BAAGateError → HTTP 451 (see ADR-0005).
 # ---------------------------------------------------------------------------
 
 
 class EchoRequest(BaseModel):
     tier: Literal["fast", "balanced", "reasoning"] = Field(
         default="fast",
-        description="Model tier. 'fast'->Ollama; 'balanced'/'reasoning'->OpenRouter.",
+        description="Model tier. 'fast'->Ollama; 'balanced'/'reasoning'->Anthropic (ADR-0004).",
     )
     prompt: str = Field(..., min_length=1, description="User message to echo through the LLM.")
     system: str | None = Field(
@@ -152,7 +189,10 @@ async def agents_echo(payload: EchoRequest, request: Request) -> EchoResponse:
         trace_id=trace_id,
     )
 
-    gateway: TieredAIGateway = request.app.state.ai_gateway
+    # Typed as the abstract AIGateway — could be a raw router or wrapped in guardrails.
+    # The BAA gate raises BAAGateError, handled by the app-level 451 exception handler
+    # above (does NOT fall into this except AIGatewayError block by design; see ADR-0005).
+    gateway: AIGateway = request.app.state.ai_gateway
     try:
         result = await gateway.complete(req)
     except AIGatewayError as exc:

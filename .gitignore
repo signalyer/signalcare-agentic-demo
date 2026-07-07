@@ -24,6 +24,12 @@ data/uploads/
 # detection (see ADR-0009 §5). Git tracks the YAML source of truth; this
 # sidecar's only reader is the next startup's drift comparator.
 data/prompt_registry_state.json
+# Rotating L2/L3 log files — the digest tool greps these for guardrail
+# activity counts (ADR-0008 §7). Never committed; runtime artifact.
+data/logs/
+# Generated Founder Mode digests — daily JSON + markdown under
+# data/digests/. Grep-able history for local review; not source of truth.
+data/digests/
 *.local
 .DS_Store
 Thumbs.db

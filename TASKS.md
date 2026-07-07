@@ -1,6 +1,6 @@
 # SignalCare Agentic Demo — Task Ledger
 
-> Last reconciled: 2026-07-07 (Session A of Phase 2 task 4 landed: prompt_registry package + first canonical YAML shipped per ADR-0009; runtime stack unchanged; 124/124 unit tests green including 28 new)
+> Last reconciled: 2026-07-07 (Session B of Phase 2 task 4 landed: compliance_ops agent + tools + renderer + hardening seed + rotating log file; 151/151 unit tests green including 27 new for compliance_ops; only cron trigger + admin UI page + live verify remain for Phase 2 close-out)
 > Format: Phase-grouped (see global CLAUDE.md `PROJECT-TASKS.md` template)
 > Status: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked
 
@@ -49,8 +49,8 @@
 - [x] Implement `app/L2_guardrails/baa_gate.py` — real middleware that blocks PHI-bearing calls to unapproved endpoints — commit d02b92a (ADR-0005 wrap-the-router), retrofitted to phi_present-conditional in commit 7d104ba (ADR-0006)
 - [x] Implement `app/L2_guardrails/phi_redactor.py` — T1-T4 tiered redaction — commit 7d104ba (regex-based; Presidio swap-in noted; 22 new unit tests; runtime stack now `PHIRedactor(BAAGateGuard(TieredAIGateway))`; 50/50 unit tests green)
 - [x] Implement `app/L2_guardrails/injection_sentinel.py` — prompt injection classifier — commit 7289983 (ADR-0007 hybrid regex+LLM; regex-first with 10 anchored patterns, suspicion-keyword-gated Fast-tier LLM fallback via injected classifier; classifier reuses gate-wrapped router — no recursion, no redactor bypass of raw content; defensive `phi_present=True` on classifier calls; fail-open on classifier error; `SENTINEL_MODE=block|flag|off` env; `InjectionSentinelError` → HTTP 400; runtime stack now `InjectionSentinel(PHIRedactor(BAAGateGuard(TieredAIGateway)), classifier=BAAGateGuard(TieredAIGateway))`; 46 new unit tests; 96/96 unit tests green)
-- [ ] Implement `app/L3_agents/compliance_ops/` — Founder Mode digest agent (UX spec'd in ADR-0008: fixed 5-section structure, 300-word cap, evidence-only synthesis, JSON schema in prompt, admin UI + file persistence, apscheduler 06:30 local, email deferred to Phase 3; ready to implement)
-- [ ] Data sources for digest: docker stats, Postgres audit table, fake `hardening_status.json`
+- [x] Implement `app/L3_agents/compliance_ops/` — Founder Mode digest agent (Session B: `ComplianceOpsAgent` + `tools.py` + `renderer.py` + README; Balanced-tier synthesis + source-of-truth overrides on guardrail counts and systems states per ADR-0008 §5; cap enforcement + WARN on overflow; defensive `_parse_digest_json` mirroring the sentinel classifier parser; both `.json` and `.md` persistence per ADR-0008 §2)
+- [x] Data sources for digest (Session B): `psutil` host stats (CPU/memory/disk), httpx probes for Ollama `/api/tags` + Anthropic `/v1/models`, `data/seed/hardening_status.json` (8 controls), rotating-file log parser at `data/logs/signalcare.log` (BAA denies + PHI T1/T2/T3 + injection block/flag with 24h window). Docker stats and Postgres audit deferred to Phase 3 (out of scope per ADR-0003).
 - [x] Prompt: registered in YAML at `app/L0_observability/prompts/compliance_ops_digest.yaml` (schema per ADR-0009 §3; ADR-0008 §5 content — Session A)
 - [x] Prompt registry — Phase 2 `FileBackedPromptRegistry` per ADR-0009 (YAML-first + JSON state snapshot + content-hash versioning + drift log; PromptRegistry protocol interface for Phase 3 additive Postgres swap; wired into main.py lifespan; 28 new unit tests — Session A)
 - [ ] Cron job: daily digest at 06:30

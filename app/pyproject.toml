@@ -49,6 +49,7 @@ dependencies = [
     "pyyaml>=6.0",
     "faker>=33.0",           # synthetic data generation
     "cryptography>=44.0",
+    "psutil>=6.1",           # host stats for L3 compliance_ops (ADR-0008 §7)
 ]
 
 [project.optional-dependencies]

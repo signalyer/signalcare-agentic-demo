@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Literal
 
@@ -34,8 +35,36 @@ from L6_adapters.ai_gateway import (
     TieredAIGateway,
 )
 
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+
+
+def _configure_logging() -> None:
+    """Attach stdout + rotating-file handlers to the root logger.
+
+    Durable file at ``data/logs/signalcare.log`` is the source the L3
+    compliance_ops digest tool greps for guardrail activity counts (see
+    ADR-0008 §7). Rotates at 10MB with 3 backups so a runaway loop
+    cannot silently fill the disk. Directory is created if missing —
+    fresh installs boot cleanly with an empty log.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    log_dir = repo_root / "data" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "signalcare.log"
+    handlers: list[logging.Handler] = [
+        logging.StreamHandler(),
+        RotatingFileHandler(
+            log_path,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        ),
+    ]
+    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT, handlers=handlers)
+
+
+_configure_logging()
 logger = logging.getLogger("signalcare")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 
 @asynccontextmanager

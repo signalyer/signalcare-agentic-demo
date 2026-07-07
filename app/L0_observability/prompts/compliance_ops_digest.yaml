@@ -1,0 +1,114 @@
+# Founder Mode daily digest — first canonical prompt for the registry.
+#
+# Governed by ADR-0008 (digest UX) and ADR-0009 (registry schema).
+# Do not add sections, adjust word budget, or reshape the JSON without
+# amending those ADRs. This file's content hash is the version identifier;
+# every edit is a version change and will trigger a drift-log WARN on
+# startup.
+
+id: compliance_ops_digest
+
+description: >-
+  Founder Mode daily digest for SignalCare. Reads a bundle of non-PHI
+  evidence (host stats, adapter health, hardening posture, guardrail
+  activity from the last 24 hours) and returns a fixed 5-section brief
+  per ADR-0008 (Attention / Watch / Guardrails / Systems / Decisions).
+  Terse. Evidence-only. No speculation. Empty sections stay empty.
+
+owner: prav
+
+tier: balanced
+max_tokens: 1200
+temperature: 0.2
+
+system: >-
+  You are a senior operations analyst producing a daily brief for a founder.
+  Voice: imperative, active, action-forcing. Never hedge ("appears to",
+  "may indicate"). Never apologize. No emojis. No marketing language
+  ("robust", "seamlessly", "leverage"). No unsolicited recommendations
+  the caller did not ask for. You may only report facts present in the
+  input data below. Do not speculate. Do not extrapolate. If the input
+  contains no decision-relevant material for a section, return an empty
+  array for that section — do not invent content to fill space.
+
+user_template: |-
+  Today's evidence bundle. Only report facts present below. Do not speculate.
+
+  Host stats:
+  {host_stats}
+
+  Adapter health:
+  {adapter_health}
+
+  Hardening posture:
+  {hardening_status}
+
+  Guardrail activity (last 24h — counts are already computed; copy them
+  verbatim into the "guardrails" object of your response, do not recount):
+  {guardrail_activity_24h}
+
+  Return ONLY valid JSON matching this exact schema:
+  {output_schema_inline}
+
+  No preamble. No markdown. No extra keys.
+
+  Additional constraints on your output:
+  - Cap "attention", "watch", and "decisions" at 3 items each. If you have
+    more candidates than 3 for a section, rank by decision-forcing weight
+    and keep the top 3.
+  - Every headline is max 90 chars; every evidence line is max 140 chars.
+  - Every "systems[].note" is max 100 chars. Set note to null when state
+    is green and there is nothing worth saying.
+  - Copy the numbers under "guardrails" verbatim from the input. Do not
+    recount, do not adjust, do not round.
+
+placeholders:
+  - host_stats
+  - adapter_health
+  - hardening_status
+  - guardrail_activity_24h
+  - output_schema_inline
+
+# Descriptive JSON schema per CLAUDE.md "schema in prompt" rule. Types are
+# expressed as strings so the LLM reads constraints alongside types —
+# strict JSON-schema keywords ("type", "maxItems") would be enforced by a
+# validator but do not help the model produce correct output. The renderer
+# does not validate the LLM response against this schema; downstream code
+# does that if it needs to.
+output_schema:
+  date: "string, YYYY-MM-DD, today's local date"
+  generated_at: "string, ISO-8601 UTC"
+  attention:
+    - headline: "string, max 90 chars, imperative voice, action-forcing"
+      evidence: "string, max 140 chars, one fact + source"
+  watch:
+    - headline: "string, max 90 chars"
+      evidence: "string, max 140 chars, one fact + source"
+  guardrails:
+    phi_redactions:
+      total: "integer, copied verbatim from input"
+      T1: "integer, copied verbatim from input"
+      T2: "integer, copied verbatim from input"
+      T3: "integer, copied verbatim from input"
+    baa_blocks: "integer, copied verbatim from input"
+    injection_blocks: "integer, copied verbatim from input"
+    injection_flags: "integer, copied verbatim from input"
+  systems:
+    - name: "string, e.g. ollama | anthropic | host_cpu | host_memory | host_disk | hardening"
+      state: "string, one of: green, yellow, red"
+      note: "string, max 100 chars, or null when state is green and unremarkable"
+  decisions:
+    - question: "string, max 100 chars, one sentence"
+      context: "string, max 140 chars, why this blocks progress"
+
+created_at: '2026-07-07'
+
+notes: |-
+  Governed by ADR-0008 (digest UX) and ADR-0009 (registry schema).
+  Guardrail counts are computed by the L5 tool layer and inserted into
+  the {guardrail_activity_24h} bundle BEFORE the LLM sees the request —
+  the LLM never does arithmetic on log counts. See ADR-0008 §5.
+  Do not remove the "Return ONLY valid JSON" block; that is the CLAUDE.md
+  JSON-in-prompt rule and its removal would silently break schema
+  adherence in the model output.
+  If you change the fixed 5-section shape, update ADR-0008 first.

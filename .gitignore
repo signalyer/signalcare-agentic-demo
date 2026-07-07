@@ -12,6 +12,7 @@ dist/
 build/
 *.egg-info/
 .pytest_cache/
+.pytest-tmp/
 .ruff_cache/
 .mypy_cache/
 .coverage
@@ -19,6 +20,10 @@ htmlcov/
 evals/reports/*.json
 !evals/reports/.gitkeep
 data/uploads/
+# Prompt registry runtime snapshot — regenerated on every startup for drift
+# detection (see ADR-0009 §5). Git tracks the YAML source of truth; this
+# sidecar's only reader is the next startup's drift comparator.
+data/prompt_registry_state.json
 *.local
 .DS_Store
 Thumbs.db

@@ -1,6 +1,6 @@
 # SignalCare Agentic Demo — Task Ledger
 
-> Last reconciled: 2026-07-07 (Phase 2 task 3 CLOSED at commit 7289983; ALL Phase 2 design blockers resolved — ADR-0007 injection sentinel, ADR-0008 digest UX, ADR-0009 prompt registry storage; ready to build compliance_ops)
+> Last reconciled: 2026-07-07 (Session A of Phase 2 task 4 landed: prompt_registry package + first canonical YAML shipped per ADR-0009; runtime stack unchanged; 124/124 unit tests green including 28 new)
 > Format: Phase-grouped (see global CLAUDE.md `PROJECT-TASKS.md` template)
 > Status: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked
 
@@ -51,8 +51,8 @@
 - [x] Implement `app/L2_guardrails/injection_sentinel.py` — prompt injection classifier — commit 7289983 (ADR-0007 hybrid regex+LLM; regex-first with 10 anchored patterns, suspicion-keyword-gated Fast-tier LLM fallback via injected classifier; classifier reuses gate-wrapped router — no recursion, no redactor bypass of raw content; defensive `phi_present=True` on classifier calls; fail-open on classifier error; `SENTINEL_MODE=block|flag|off` env; `InjectionSentinelError` → HTTP 400; runtime stack now `InjectionSentinel(PHIRedactor(BAAGateGuard(TieredAIGateway)), classifier=BAAGateGuard(TieredAIGateway))`; 46 new unit tests; 96/96 unit tests green)
 - [ ] Implement `app/L3_agents/compliance_ops/` — Founder Mode digest agent (UX spec'd in ADR-0008: fixed 5-section structure, 300-word cap, evidence-only synthesis, JSON schema in prompt, admin UI + file persistence, apscheduler 06:30 local, email deferred to Phase 3; ready to implement)
 - [ ] Data sources for digest: docker stats, Postgres audit table, fake `hardening_status.json`
-- [ ] Prompt: registered in YAML at `app/L0_observability/prompts/compliance_ops_digest.yaml` (schema spec'd in ADR-0009 §3)
-- [ ] Prompt registry — Phase 2 `FileBackedPromptRegistry` per ADR-0009 (YAML-first + JSON state snapshot + content-hash versioning + drift log). Postgres runtime table deferred to Phase 3 as time-boxed rule-6 relaxation.
+- [x] Prompt: registered in YAML at `app/L0_observability/prompts/compliance_ops_digest.yaml` (schema per ADR-0009 §3; ADR-0008 §5 content — Session A)
+- [x] Prompt registry — Phase 2 `FileBackedPromptRegistry` per ADR-0009 (YAML-first + JSON state snapshot + content-hash versioning + drift log; PromptRegistry protocol interface for Phase 3 additive Postgres swap; wired into main.py lifespan; 28 new unit tests — Session A)
 - [ ] Cron job: daily digest at 06:30
 - [ ] Simple digest page in Admin UI
 - [ ] Test: full flow from cron trigger → LLM → digest email/UI

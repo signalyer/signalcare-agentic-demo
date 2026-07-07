@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -16,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from L0_observability.prompt_registry import FileBackedPromptRegistry
 from L2_guardrails import (
     BAAGateError,
     BAAGateGuard,
@@ -54,9 +56,20 @@ async def lifespan(app: FastAPI):
     # (a) no recursion, (b) classifier sees raw content, (c) BAA gate still
     # applies to the classifier's own LLM call. See ADR-0007.
     app.state.ai_gateway = InjectionSentinel(redacted, classifier=gated)
+    # L0: prompt registry — YAML source of truth (Phase 2 per ADR-0009).
+    # One directory walk at startup; every agent reads via
+    # ``app.state.prompt_registry.get(key)``. Postgres runtime table lands in
+    # Phase 3 as an additive same-interface swap. Path anchors are relative
+    # to this file so the resolution is CWD-independent (uvicorn is launched
+    # with CWD=app/, tests import via pytest.ini pythonpath=app).
+    app_root = Path(__file__).resolve().parent
+    repo_root = app_root.parent
+    app.state.prompt_registry = FileBackedPromptRegistry(
+        prompts_dir=app_root / "L0_observability" / "prompts",
+        state_file=repo_root / "data" / "prompt_registry_state.json",
+    )
     # TODO Week 3: initialize identity/relational/object/event/secrets/telemetry adapters
     # TODO Week 3: start L4 orchestrator background workers
-    # TODO Week 2: seed prompt registry from YAML sources
     yield
     logger.info("SignalCare Agentic Demo shutting down")
     await app.state.ai_gateway.close()

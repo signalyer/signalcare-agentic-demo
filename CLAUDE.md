@@ -56,7 +56,7 @@ If you're tempted to put something at the wrong layer, stop and reconsider.
 3. **BAA gate is real middleware.** Every LLM call passes through `app/L2_guardrails/baa_gate.py`. No exceptions.
 4. **Every AI-generated claim carries a citation.** Un-cited claims are blocked at the guardrail layer.
 5. **No cloud-vendor SDK imports outside of `app/L6_adapters/`.** No `boto3`, no `azure-sdk-*`, no `google-cloud-*` anywhere else. If found, the cloud-agnostic property is broken.
-6. **Prompt registry has both YAML source of truth and Postgres runtime table.** Both must be updated together.
+6. **Prompt registry has both YAML source of truth and Postgres runtime table.** Both must be updated together. *(Phase 2 relaxation documented in [ADR-0009](docs/adrs/0009-prompt-registry-yaml-first-postgres-additive.md) — YAML-only until Phase 3 restores Postgres. Not silent; read the ADR before flagging rule 6 non-compliance.)*
 7. **Synthetic data only.** All names, dates, IDs, medical details are obviously fake. `Test-001`, `John TestPatient`, `GA-TEST-100001`.
 
 ## Change Discipline

@@ -1,16 +1,21 @@
 """Tier-based dispatch across concrete AI Gateway impls.
 
-Fast → Ollama, Balanced/Reasoning → OpenRouter.
+Fast → Ollama (local), Balanced/Reasoning → Anthropic (hosted, direct SDK).
 
-The router is itself an `AIGateway`, so callers upstream never see the concrete impls.
-The whole cloud-agnostic property from ADR-0002 hinges on this file staying skinny — no
-provider-specific logic, no format munging, no fallback ladders that leak per-provider
-knowledge. Just dispatch.
+Per ADR-0004 the hosted tier uses the Anthropic SDK directly rather than routing
+through OpenRouter — one fewer external dependency, and the demo showcases two
+genuinely different provider SDKs (Ollama REST + Anthropic SDK) behind the same
+``AIGateway`` interface.
+
+The router is itself an ``AIGateway``, so callers upstream never see the concrete
+impls. The whole cloud-agnostic property from ADR-0002 hinges on this file staying
+skinny — no provider-specific logic, no format munging. Just dispatch.
 """
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from .anthropic_gateway import AnthropicGateway
 from .base import (
     AIGateway,
     AIGatewayError,
@@ -19,14 +24,13 @@ from .base import (
     Tier,
 )
 from .local import OllamaGateway
-from .openrouter import OpenRouterGateway
 
 
 class TieredAIGateway(AIGateway):
     """Composite AI Gateway that routes by tier.
 
     Constructor injection allows tests to swap in mock gateways without touching env vars.
-    Default construction wires the real Ollama + OpenRouter impls.
+    Default construction wires the real Ollama + Anthropic impls.
     """
 
     provider_name = "tiered-router"
@@ -37,7 +41,7 @@ class TieredAIGateway(AIGateway):
         hosted: AIGateway | None = None,
     ):
         self._local = local if local is not None else OllamaGateway()
-        self._hosted = hosted if hosted is not None else OpenRouterGateway()
+        self._hosted = hosted if hosted is not None else AnthropicGateway()
 
     def supports_tier(self, tier: Tier) -> bool:
         return self._local.supports_tier(tier) or self._hosted.supports_tier(tier)

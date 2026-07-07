@@ -134,32 +134,51 @@ class TestOllamaAdapterInternals:
         assert not gateway.supports_tier(Tier.REASONING)
 
 
-class TestOpenRouterAdapterInternals:
-    """OpenRouter-specific offline checks. No network."""
+class TestAnthropicAdapterInternals:
+    """Anthropic-specific offline checks. No network."""
 
     def test_missing_api_key_raises(self, monkeypatch):
-        from L6_adapters.ai_gateway.openrouter import OpenRouterGateway
+        from L6_adapters.ai_gateway.anthropic_gateway import AnthropicGateway
 
-        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         with pytest.raises(AIGatewayError):
-            OpenRouterGateway()
-
-    def test_placeholder_key_rejected(self, monkeypatch):
-        from L6_adapters.ai_gateway.openrouter import OpenRouterGateway
-
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-REPLACE_ME")
-        with pytest.raises(AIGatewayError):
-            OpenRouterGateway()
+            AnthropicGateway()
 
     def test_tier_to_model_mapping(self, monkeypatch):
-        from L6_adapters.ai_gateway.openrouter import OpenRouterGateway
+        from L6_adapters.ai_gateway.anthropic_gateway import AnthropicGateway
 
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-fake-but-nonplaceholder")
-        gateway = OpenRouterGateway(
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-but-nonempty")
+        gateway = AnthropicGateway(
             reasoning_model="reasoning-x",
             balanced_model="balanced-x",
-            fast_model="fast-x",
         )
         assert gateway._model_for(Tier.REASONING) == "reasoning-x"  # noqa: SLF001
         assert gateway._model_for(Tier.BALANCED) == "balanced-x"  # noqa: SLF001
-        assert gateway._model_for(Tier.FAST) == "fast-x"  # noqa: SLF001
+        with pytest.raises(AIGatewayError):
+            gateway._model_for(Tier.FAST)  # noqa: SLF001 — Anthropic doesn't serve Fast
+
+    def test_system_split_pulls_out_system_messages(self, monkeypatch):
+        from L6_adapters.ai_gateway.anthropic_gateway import AnthropicGateway
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-but-nonempty")
+        system, user = AnthropicGateway._split_system(  # noqa: SLF001
+            [
+                Message(role="system", content="You are terse."),
+                Message(role="user", content="Hi"),
+                Message(role="assistant", content="Hello"),
+                Message(role="system", content="Also polite."),
+            ]
+        )
+        assert "You are terse." in system
+        assert "Also polite." in system
+        assert len(user) == 2
+        assert [m.role for m in user] == ["user", "assistant"]
+
+    def test_only_supports_balanced_and_reasoning(self, monkeypatch):
+        from L6_adapters.ai_gateway.anthropic_gateway import AnthropicGateway
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-but-nonempty")
+        gateway = AnthropicGateway()
+        assert gateway.supports_tier(Tier.BALANCED)
+        assert gateway.supports_tier(Tier.REASONING)
+        assert not gateway.supports_tier(Tier.FAST)

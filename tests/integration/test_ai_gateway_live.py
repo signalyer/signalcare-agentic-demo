@@ -3,6 +3,8 @@
 Auto-skips when providers are unavailable — see per-test skip guards. Under normal Week 1
 development the developer runs these interactively; in CI they run when both providers
 are reachable.
+
+Per ADR-0004 the hosted tier uses the Anthropic SDK directly (not OpenRouter).
 """
 from __future__ import annotations
 
@@ -12,10 +14,10 @@ import httpx
 import pytest
 
 from L6_adapters.ai_gateway import (
+    AnthropicGateway,
     CompletionRequest,
     Message,
     OllamaGateway,
-    OpenRouterGateway,
     Tier,
 )
 
@@ -32,9 +34,8 @@ def _ollama_reachable() -> bool:
         return False
 
 
-def _openrouter_configured() -> bool:
-    key = os.getenv("OPENROUTER_API_KEY", "")
-    return bool(key) and not key.startswith("sk-or-v1-REPLACE")
+def _anthropic_configured() -> bool:
+    return bool(os.getenv("ANTHROPIC_API_KEY"))
 
 
 @pytest.mark.skipif(not _ollama_reachable(), reason="Ollama not reachable on OLLAMA_HOST")
@@ -63,9 +64,9 @@ async def test_ollama_completion_returns_text():
     assert result.trace_id == "live-ollama-1"
 
 
-@pytest.mark.skipif(not _openrouter_configured(), reason="OPENROUTER_API_KEY not set")
-async def test_openrouter_completion_returns_text():
-    gateway = OpenRouterGateway()
+@pytest.mark.skipif(not _anthropic_configured(), reason="ANTHROPIC_API_KEY not set")
+async def test_anthropic_completion_returns_text():
+    gateway = AnthropicGateway()
     try:
         result = await gateway.complete(
             CompletionRequest(
@@ -76,26 +77,27 @@ async def test_openrouter_completion_returns_text():
                 ],
                 max_tokens=16,
                 temperature=0.0,
-                trace_id="live-openrouter-1",
+                trace_id="live-anthropic-1",
             )
         )
     finally:
         await gateway.close()
 
-    assert result.text.strip(), "OpenRouter returned empty text"
-    assert result.provider == "openrouter"
+    assert result.text.strip(), "Anthropic returned empty text"
+    assert result.provider == "anthropic"
     assert result.model
     assert result.latency_ms > 0
-    assert result.trace_id == "live-openrouter-1"
+    assert result.trace_id == "live-anthropic-1"
 
 
 @pytest.mark.skipif(
-    not (_ollama_reachable() and _openrouter_configured()),
-    reason="Requires BOTH Ollama and OpenRouter — this is the ADR-0002 proof-point",
+    not (_ollama_reachable() and _anthropic_configured()),
+    reason="Requires BOTH Ollama and Anthropic — this is the ADR-0002 proof-point",
 )
 async def test_same_interface_serves_two_providers():
-    """The load-bearing test for ADR-0002. Same CompletionRequest shape works for both
-    providers; caller only touches Tier."""
+    """The load-bearing test for ADR-0002. Same CompletionRequest shape works for two
+    genuinely different provider SDKs (Ollama REST + Anthropic SDK). Caller only touches Tier.
+    """
     from L6_adapters.ai_gateway import TieredAIGateway
 
     router = TieredAIGateway()
@@ -120,7 +122,7 @@ async def test_same_interface_serves_two_providers():
         await router.close()
 
     assert fast.provider == "ollama"
-    assert balanced.provider == "openrouter"
-    # Two different providers, same interface shape:
+    assert balanced.provider == "anthropic"
+    # Two different provider SDKs, same interface shape:
     assert fast.text and balanced.text
     assert isinstance(fast.tokens_out, int) and isinstance(balanced.tokens_out, int)

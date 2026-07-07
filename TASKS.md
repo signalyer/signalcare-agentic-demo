@@ -1,6 +1,6 @@
 # SignalCare Agentic Demo — Task Ledger
 
-> Last reconciled: 2026-07-07 (Phase 1 core landed — commit 7c61907; see ADR-0003 for docker deferral)
+> Last reconciled: 2026-07-07 (Phase 1 CLOSED — live verify passed on both tiers; ADRs 0003 docker deferral + 0004 direct SDKs over OpenRouter)
 > Format: Phase-grouped (see global CLAUDE.md `PROJECT-TASKS.md` template)
 > Status: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked
 
@@ -26,20 +26,23 @@
 
 **Note (ADR-0003):** Docker-compose stack bring-up moved to Phase 3. Week 1 uses **native Ollama on Windows** (`http://localhost:11434`) + OpenRouter (hosted). Everything else in the compose stack is not on the Week 1 code path.
 
-- [~] Install native Ollama on Windows + pull `llama3.2:3b` (user action; ~10 min)
+- [x] Install native Ollama on Windows + pull `llama3.2:3b` (winget silent install, model live at localhost:11434)
 - [x] Implement `app/L6_adapters/ai_gateway/base.py` interface (`complete`, `stream`) — commit 7c61907
 - [x] Implement `app/L6_adapters/ai_gateway/local.py` — Ollama concrete — commit 7c61907
-- [x] Implement `app/L6_adapters/ai_gateway/openrouter.py` — OpenRouter concrete (via OpenAI-compatible client) — commit 7c61907
-- [x] Wire tier-based routing in `app/L6_adapters/ai_gateway/router.py` (Fast → Ollama, Balanced/Reasoning → OpenRouter) — commit 7c61907
+- [x] ~~Implement `openrouter.py`~~ → **superseded by `anthropic_gateway.py` per ADR-0004** (direct SDK; OpenRouter 402 no-credits triggered pivot)
+- [x] Implement `app/L6_adapters/ai_gateway/anthropic_gateway.py` — Anthropic direct SDK concrete (Balanced=Sonnet, Reasoning=Opus). Handles `system` split + `temperature` deprecation sentinel — ADR-0004
+- [x] Wire tier-based routing in `app/L6_adapters/ai_gateway/router.py` (Fast → Ollama, Balanced/Reasoning → Anthropic) — commit 7c61907, updated per ADR-0004
 - [x] Add `/agents/echo` endpoint in FastAPI `main.py` (accepts `tier` + `prompt`, returns text + model + provider + latency + token counts) — commit 7c61907
-- [~] Hello-world agent call: prove both Ollama and Claude/GPT work through the adapter — **code done, live verify pending Ollama install (blocked on user)**
-- [x] Unit tests `tests/unit/test_ai_gateway.py` — 12/12 passing offline — commit 7c61907
-- [x] Integration tests `tests/integration/test_ai_gateway_live.py` — skip-guarded, includes the ADR-0002 proof-point (same interface, two providers) — commit 7c61907
+- [x] **Hello-world agent call live-verified on all three tiers** (Fast: llama3.2:3b 601ms warm; Balanced: claude-sonnet-4-6 1091ms; Reasoning: claude-opus-4-7 1603ms) — this closes the ADR-0002 proof-point empirically
+- [x] Unit tests `tests/unit/test_ai_gateway.py` — 13/13 passing offline (added Anthropic adapter internals)
+- [x] Integration tests `tests/integration/test_ai_gateway_live.py` — 3/3 passing live (Ollama + Anthropic + same-interface proof-point)
 - [x] Add `make status-lite` target (native Ollama ping + OpenRouter reachability check) — commit 7c61907
 - [~] ~~Grafana dashboard #1: request rate, latency, model breakdown~~ → **moved to Phase 3** (batched with the other three dashboards; interim visibility via `structlog` stdout)
 
-### Open design point surfaced this session (needs Prav's call before Phase 2)
-- [ ] Env loading path: bare `os.getenv` + `uvicorn --env-file` **(A, recommended for Week 1)** vs centralised `pydantic-settings` Settings loaded once at startup **(B, better fit for Phase 3 when Postgres/NATS/Vault creds land)**. Currently A is in effect implicitly (no `load_dotenv` call); either A must be documented in README or B implemented before Phase 3 credentials wiring.
+### Phase 1 CLOSED: 2026-07-07. All Week 1 code deliverables live-verified. Ready for Phase 2.
+
+### Open design point surfaced this session (blocks Phase 2 wiring)
+- [ ] Env loading path: uvicorn `--env-file` (A, currently in effect) vs centralised `pydantic-settings` `Settings` loaded once at startup (B, better fit for Phase 3 when Postgres/NATS/Vault creds land). Live verify uses A via `uvicorn main:app --env-file ..\.env`. Document in README or migrate to B before Phase 3 credentials wiring.
 
 ## Phase 2 — Week 2: L1 API + L2 Guardrails + Agent #8 Compliance/Ops (Founder Mode)
 

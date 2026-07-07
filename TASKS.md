@@ -1,6 +1,6 @@
 # SignalCare Agentic Demo — Task Ledger
 
-> Last reconciled: 2026-07-07 (Phase 2 task 3 landed — L2 injection sentinel at commit 7289983; ADR-0007 hybrid regex+LLM detection, outermost L2 wrap, fail-open classifier, 46 new unit tests)
+> Last reconciled: 2026-07-07 (Phase 2 task 3 CLOSED at commit 7289983; ALL Phase 2 design blockers resolved — ADR-0007 injection sentinel, ADR-0008 digest UX, ADR-0009 prompt registry storage; ready to build compliance_ops)
 > Format: Phase-grouped (see global CLAUDE.md `PROJECT-TASKS.md` template)
 > Status: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked
 

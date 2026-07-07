@@ -16,7 +16,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from L2_guardrails import BAAGateError, BAAGateGuard, PHIRedactor
+from L2_guardrails import (
+    BAAGateError,
+    BAAGateGuard,
+    InjectionSentinel,
+    InjectionSentinelError,
+    PHIRedactor,
+)
 from L6_adapters.ai_gateway import (
     AIGateway,
     AIGatewayError,
@@ -40,10 +46,14 @@ async def lifespan(app: FastAPI):
     # ADR-0005: guard wraps the router, not individual adapters.
     gated = BAAGateGuard(tiered)
     # L2: PHI redactor — scans content, tags phi_present + phi_tier, redacts per
-    # REDACTION_MODE. Outermost so it runs FIRST and produces the flag the gate
-    # then consults (ADR-0006). Injection sentinel will slot outside this later.
-    app.state.ai_gateway = PHIRedactor(gated)
-    # TODO Week 2: add injection sentinel outside PHIRedactor
+    # REDACTION_MODE. Runs before the gate so the gate has the flag (ADR-0006).
+    redacted = PHIRedactor(gated)
+    # L2: Injection sentinel — outermost, runs first. Regex-first, LLM fallback
+    # for suspicion-flagged content. Classifier gateway is the gate-wrapped
+    # router (skipping the redactor and the sentinel itself) so that
+    # (a) no recursion, (b) classifier sees raw content, (c) BAA gate still
+    # applies to the classifier's own LLM call. See ADR-0007.
+    app.state.ai_gateway = InjectionSentinel(redacted, classifier=gated)
     # TODO Week 3: initialize identity/relational/object/event/secrets/telemetry adapters
     # TODO Week 3: start L4 orchestrator background workers
     # TODO Week 2: seed prompt registry from YAML sources
@@ -67,7 +77,6 @@ app.add_middleware(
 )
 
 
-# TODO Week 2: add PHI redactor + injection sentinel to the L2 middleware stack
 # TODO Week 3: attach OpenTelemetry instrumentation
 # TODO Week 3: mount L1 review UX routers
 # TODO Week 4-7: mount agent routers
@@ -96,6 +105,35 @@ async def baa_gate_error_handler(request: Request, exc: BAAGateError) -> JSONRes
                 "blocked by L2 BAA gate."
             ),
             "vendor": exc.vendor,
+            "trace_id": exc.trace_id,
+        },
+    )
+
+
+@app.exception_handler(InjectionSentinelError)
+async def injection_sentinel_error_handler(
+    request: Request, exc: InjectionSentinelError
+) -> JSONResponse:
+    """Map injection sentinel blocks to HTTP 400 (Bad Request).
+
+    The malformed component is the request content itself (adversarial input).
+    Detail is deliberately terse to avoid leaking the pattern set to a probing
+    attacker — internal detail (source, pattern) stays in the audit log,
+    keyed by trace_id. Distinct from BAAGateError (451) and AIGatewayError
+    (502). See ADR-0007.
+    """
+    logger.warning(
+        "injection_sentinel_blocked source=%s pattern=%s trace_id=%s path=%s",
+        exc.source,
+        exc.pattern,
+        exc.trace_id,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "Request blocked",
+            "detail": "Message content flagged by L2 injection sentinel.",
             "trace_id": exc.trace_id,
         },
     )

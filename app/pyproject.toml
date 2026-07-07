@@ -50,6 +50,7 @@ dependencies = [
     "faker>=33.0",           # synthetic data generation
     "cryptography>=44.0",
     "psutil>=6.1",           # host stats for L3 compliance_ops (ADR-0008 §7)
+    "apscheduler>=3.10",     # AsyncIOScheduler cron trigger for L3 compliance_ops (ADR-0008 §2, §8)
 ]
 
 [project.optional-dependencies]

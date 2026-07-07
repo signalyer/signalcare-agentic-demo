@@ -6,19 +6,26 @@ L5 (Tools) -> L6 (Adapters) -> L7 (Stability Map / Local Impls).
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import FastAPI, HTTPException, Request
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from L0_observability.prompt_registry import FileBackedPromptRegistry
+from L0_observability.prompt_registry import FileBackedPromptRegistry, PromptRenderer
 from L2_guardrails import (
     BAAGateError,
     BAAGateGuard,
@@ -26,6 +33,7 @@ from L2_guardrails import (
     InjectionSentinelError,
     PHIRedactor,
 )
+from L3_agents.compliance_ops import ComplianceOpsAgent, DigestResult
 from L6_adapters.ai_gateway import (
     AIGateway,
     AIGatewayError,
@@ -67,6 +75,40 @@ _configure_logging()
 logger = logging.getLogger("signalcare")
 
 
+_DIGEST_DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
+_DIGEST_JOB_ID = "compliance_ops_daily_digest"
+
+
+def _resolve_digest_tz() -> ZoneInfo:
+    """Read DIGEST_TZ, fall back to UTC on unknown zone.
+
+    ADR-0008 §8 pins the trigger at 06:30 in DIGEST_TZ (Prav's local is
+    America/New_York; default UTC). Bad env value must not prevent boot —
+    fail-open to UTC with a WARN. Same shape as the sentinel classifier's
+    fail-open error path.
+    """
+    name = os.getenv("DIGEST_TZ", "UTC")
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        logger.warning("digest_tz_invalid requested=%s fallback=UTC", name)
+        return ZoneInfo("UTC")
+
+
+def _ondemand_digest_allowed() -> bool:
+    """Env-gate for POST /digest/generate. Read on every call, not cached.
+
+    Default false per ADR-0008 §2 — the endpoint is a dev/demo affordance.
+    Re-reading env each call means flipping the flag doesn't need a restart
+    during a demo session.
+    """
+    return os.getenv("ALLOW_ONDEMAND_DIGEST", "false").strip().lower() in {
+        "true",
+        "1",
+        "yes",
+    }
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown hooks — initialize adapters, tear them down cleanly."""
@@ -97,10 +139,52 @@ async def lifespan(app: FastAPI):
         prompts_dir=app_root / "L0_observability" / "prompts",
         state_file=repo_root / "data" / "prompt_registry_state.json",
     )
+    # L3: compliance_ops digest agent (see ADR-0008). CONSUMES the L2-wrapped
+    # gateway via app.state.ai_gateway — L3 agents do not add guardrails.
+    # Path anchors are repo_root-relative, matching the tools layer's
+    # expectations (rotating log at data/logs/signalcare.log, hardening seed
+    # at data/seed/hardening_status.json, output at data/digests/).
+    digests_dir = repo_root / "data" / "digests"
+    app.state.digests_dir = digests_dir
+    app.state.digest_agent = ComplianceOpsAgent(
+        gateway=app.state.ai_gateway,
+        registry=app.state.prompt_registry,
+        renderer=PromptRenderer(),
+        digests_dir=digests_dir,
+        log_path=repo_root / "data" / "logs" / "signalcare.log",
+        hardening_path=repo_root / "data" / "seed" / "hardening_status.json",
+        ollama_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
+    )
+    # L3 cron trigger — apscheduler on the same asyncio loop as FastAPI so
+    # no thread hand-off. 30-minute grace so a boot delay at 06:31 still
+    # fires the day's run. shutdown(wait=False) at teardown cancels the
+    # in-flight job cleanly. See ADR-0008 §2, §8.
+    digest_tz = _resolve_digest_tz()
+    app.state.digest_tz = digest_tz
+    scheduler = AsyncIOScheduler(timezone=digest_tz)
+    scheduler.add_job(
+        app.state.digest_agent.run_daily,
+        CronTrigger(hour=6, minute=30, timezone=digest_tz),
+        id=_DIGEST_JOB_ID,
+        replace_existing=True,
+        misfire_grace_time=60 * 30,
+    )
+    scheduler.start()
+    app.state.scheduler = scheduler
+    next_run = scheduler.get_job(_DIGEST_JOB_ID).next_run_time
+    logger.info(
+        "compliance_ops_scheduler_started tz=%s next_run=%s ondemand=%s",
+        digest_tz.key,
+        next_run.isoformat() if next_run else "unscheduled",
+        _ondemand_digest_allowed(),
+    )
     # TODO Week 3: initialize identity/relational/object/event/secrets/telemetry adapters
     # TODO Week 3: start L4 orchestrator background workers
     yield
     logger.info("SignalCare Agentic Demo shutting down")
+    if hasattr(app.state, "scheduler"):
+        app.state.scheduler.shutdown(wait=False)
     await app.state.ai_gateway.close()
 
 
@@ -302,3 +386,154 @@ async def agents_echo(payload: EchoRequest, request: Request) -> EchoResponse:
         latency_ms=result.latency_ms,
         trace_id=trace_id,
     )
+
+
+# ---------------------------------------------------------------------------
+# /digest/* — Phase 2 Compliance/Ops Founder Mode digest surface (ADR-0008 §2).
+#
+# Read paths (GET) serve pre-generated files from data/digests/ — the cron
+# job at 06:30 in DIGEST_TZ produces YYYY-MM-DD.{json,md}. Never generate
+# on-the-fly during a GET; a 404 means "the cron hasn't run yet today".
+#
+# Write path (POST) is env-gated by ALLOW_ONDEMAND_DIGEST (default false).
+# Intended for demos and manual triggers, not production. The env-gate is
+# re-read each call so a demo operator can flip the flag without restart.
+# ---------------------------------------------------------------------------
+
+
+class DigestGenerateResponse(BaseModel):
+    """Return shape for POST /digest/generate.
+
+    Paths are stringified so callers on any platform get the same shape;
+    the admin UI (C-frontend session) fetches ``date`` and follows up with
+    GET /digest/{date}/markdown for content.
+    """
+
+    date: str
+    json_path: str
+    markdown_path: str
+    caps_triggered: dict[str, int]
+    guardrail_overrides: bool
+
+
+def _today_str_in_digest_tz(request: Request) -> str:
+    """Return today's YYYY-MM-DD in the scheduler's timezone.
+
+    A raw ``datetime.now()`` would resolve "today" in the server's local
+    time — wrong if the server is UTC and DIGEST_TZ is America/New_York.
+    Matching the tz the cron fires in guarantees /digest/today resolves
+    to the same file the cron just wrote at 06:30.
+    """
+    tz = getattr(request.app.state, "digest_tz", None) or ZoneInfo("UTC")
+    return datetime.now(tz).strftime("%Y-%m-%d")
+
+
+def _read_digest_json(digests_dir: Path, date_str: str) -> dict:
+    path = digests_dir / f"{date_str}.json"
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"no digest generated for {date_str}",
+        )
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("digest_read_error date=%s kind=json err=%s", date_str, exc)
+        raise HTTPException(status_code=500, detail=f"digest read failed: {exc}") from exc
+
+
+def _read_digest_markdown(digests_dir: Path, date_str: str) -> str:
+    path = digests_dir / f"{date_str}.md"
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"no digest markdown for {date_str}",
+        )
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("digest_read_error date=%s kind=md err=%s", date_str, exc)
+        raise HTTPException(status_code=500, detail=f"digest read failed: {exc}") from exc
+
+
+digest_router = APIRouter(prefix="/digest", tags=["digest"])
+
+
+# Route ordering matters — `/today` and `/today/markdown` must be declared
+# BEFORE `/{date_str}` so FastAPI resolves the literal path first. The date
+# pattern would reject "today" anyway, but declaration order makes the
+# routing table's intent explicit.
+
+
+@digest_router.get("/today")
+async def digest_today(request: Request) -> dict:
+    """Return today's digest as JSON. 404 if the cron hasn't produced it yet."""
+    date_str = _today_str_in_digest_tz(request)
+    return _read_digest_json(request.app.state.digests_dir, date_str)
+
+
+@digest_router.get("/today/markdown", response_class=Response)
+async def digest_today_markdown(request: Request) -> Response:
+    """Return today's digest as rendered markdown (text/markdown)."""
+    date_str = _today_str_in_digest_tz(request)
+    body = _read_digest_markdown(request.app.state.digests_dir, date_str)
+    return Response(content=body, media_type="text/markdown; charset=utf-8")
+
+
+@digest_router.get("/{date_str}")
+async def digest_by_date(
+    request: Request,
+    date_str: str = FastAPIPath(..., pattern=_DIGEST_DATE_PATTERN, examples=["2026-07-07"]),
+) -> dict:
+    """Return the digest JSON for a specific historical date."""
+    return _read_digest_json(request.app.state.digests_dir, date_str)
+
+
+@digest_router.get("/{date_str}/markdown", response_class=Response)
+async def digest_by_date_markdown(
+    request: Request,
+    date_str: str = FastAPIPath(..., pattern=_DIGEST_DATE_PATTERN, examples=["2026-07-07"]),
+) -> Response:
+    """Return the digest markdown for a specific historical date."""
+    body = _read_digest_markdown(request.app.state.digests_dir, date_str)
+    return Response(content=body, media_type="text/markdown; charset=utf-8")
+
+
+@digest_router.post("/generate", response_model=DigestGenerateResponse)
+async def digest_generate(request: Request) -> DigestGenerateResponse:
+    """Regenerate today's digest immediately. Env-gated by ALLOW_ONDEMAND_DIGEST.
+
+    Same-day reruns overwrite. Live Anthropic call — cost is pennies per
+    run at Balanced tier / 1200 max_tokens; this is the surface `make
+    demo-digest` hits to prove the L1→L2→L6 stack end-to-end.
+    """
+    if not _ondemand_digest_allowed():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "on-demand digest is disabled; set ALLOW_ONDEMAND_DIGEST=true "
+                "to enable (dev/demo only — see ADR-0008 §2)"
+            ),
+        )
+    trace_id = request.headers.get("x-trace-id") or f"digest-ondemand-{uuid.uuid4().hex[:12]}"
+    logger.info("digest_generate_ondemand_start trace_id=%s", trace_id)
+    agent: ComplianceOpsAgent = request.app.state.digest_agent
+    try:
+        result: DigestResult = await agent.run_daily()
+    except Exception as exc:
+        logger.exception("digest_generate_ondemand_failed trace_id=%s", trace_id)
+        raise HTTPException(status_code=500, detail=f"digest generation failed: {exc}") from exc
+    logger.info(
+        "digest_generate_ondemand_complete trace_id=%s date=%s caps=%s overrides=%s",
+        trace_id, result.date, result.caps_triggered, result.guardrail_overrides,
+    )
+    return DigestGenerateResponse(
+        date=result.date,
+        json_path=str(result.json_path),
+        markdown_path=str(result.markdown_path),
+        caps_triggered=result.caps_triggered,
+        guardrail_overrides=result.guardrail_overrides,
+    )
+
+
+app.include_router(digest_router)

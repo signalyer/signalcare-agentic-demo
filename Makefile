@@ -1,4 +1,4 @@
-.PHONY: help up down status status-lite logs seed demo eval test test-lite dev clean pull-models install
+.PHONY: help up down status status-lite logs seed demo demo-digest eval test test-lite dev clean pull-models install
 
 help:
 	@echo "SignalCare Agentic Demo — commands"
@@ -16,6 +16,7 @@ help:
 	@echo "    make status-lite   Ping native Ollama + OpenRouter"
 	@echo "    make dev           uvicorn main:app --reload from app/"
 	@echo "    make test-lite     Run pytest from repo root, native Python"
+	@echo "    make demo-digest   POST /digest/generate for a live Founder Mode brief"
 	@echo ""
 	@echo "  Utility:"
 	@echo "    make install       Install Python deps (uv)"
@@ -51,6 +52,22 @@ dev:
 # test-lite — pytest against native Python. Runs unit + skip-guarded integration tests.
 test-lite:
 	pytest -v
+
+# demo-digest — Phase 2 CLOSE proof-point (ADR-0008). Live end-to-end:
+# regex log parse -> psutil host stats -> httpx adapter probes -> hardening JSON
+# -> L0 prompt registry -> L2 guardrail stack -> Anthropic Balanced (Sonnet) ->
+# renderer -> data/digests/YYYY-MM-DD.{json,md}. Requires:
+#   1. `make dev` running in another shell
+#   2. ALLOW_ONDEMAND_DIGEST=true in .env (or exported)
+#   3. ANTHROPIC_API_KEY set (real Anthropic call, cost ~$0.02/run)
+# The digest surface returns the on-disk paths; those files are what the
+# admin UI's /digest page (C-frontend session) will read.
+demo-digest:
+	@echo "POST http://localhost:8000/digest/generate"
+	@curl -sS -X POST -H "Content-Type: application/json" http://localhost:8000/digest/generate | python -m json.tool || echo "  request failed — is 'make dev' running and ALLOW_ONDEMAND_DIGEST=true?"
+	@echo ""
+	@echo "Digest files landed in ./data/digests/ :"
+	@ls -1t data/digests/ 2>/dev/null | head -4 | sed 's|^|  |' || echo "  (empty — check server logs)"
 
 logs:
 	docker compose logs -f app

@@ -1,6 +1,6 @@
 # SignalCare Agentic Demo — Task Ledger
 
-> Last reconciled: 2026-07-07 (Session B of Phase 2 task 4 landed: compliance_ops agent + tools + renderer + hardening seed + rotating log file; 151/151 unit tests green including 27 new for compliance_ops; only cron trigger + admin UI page + live verify remain for Phase 2 close-out)
+> Last reconciled: 2026-07-07 (Session C of Phase 2 task 4 landed BACKEND ONLY: apscheduler cron trigger + 5 /digest endpoints + Makefile demo-digest target + 46 endpoint contract tests; 198/198 offline tests green. Admin UI /digest page DEFERRED to C-frontend session because admin_ui/ scaffold was found empty — prior handoff line 98-99 was factually wrong. Phase 2 CLOSES only after C-frontend delivers the Next.js scaffold + /digest page.)
 > Format: Phase-grouped (see global CLAUDE.md `PROJECT-TASKS.md` template)
 > Status: `[ ]` open · `[x]` done · `[~]` in progress · `[!]` blocked
 
@@ -53,9 +53,11 @@
 - [x] Data sources for digest (Session B): `psutil` host stats (CPU/memory/disk), httpx probes for Ollama `/api/tags` + Anthropic `/v1/models`, `data/seed/hardening_status.json` (8 controls), rotating-file log parser at `data/logs/signalcare.log` (BAA denies + PHI T1/T2/T3 + injection block/flag with 24h window). Docker stats and Postgres audit deferred to Phase 3 (out of scope per ADR-0003).
 - [x] Prompt: registered in YAML at `app/L0_observability/prompts/compliance_ops_digest.yaml` (schema per ADR-0009 §3; ADR-0008 §5 content — Session A)
 - [x] Prompt registry — Phase 2 `FileBackedPromptRegistry` per ADR-0009 (YAML-first + JSON state snapshot + content-hash versioning + drift log; PromptRegistry protocol interface for Phase 3 additive Postgres swap; wired into main.py lifespan; 28 new unit tests — Session A)
-- [ ] Cron job: daily digest at 06:30
-- [ ] Simple digest page in Admin UI
-- [ ] Test: full flow from cron trigger → LLM → digest email/UI
+- [x] Cron job: daily digest at 06:30 — apscheduler `AsyncIOScheduler` on the FastAPI event loop, `CronTrigger(hour=6, minute=30, timezone=DIGEST_TZ)`, 30-min misfire grace, job id `compliance_ops_daily_digest`, `scheduler.shutdown(wait=False)` at teardown. Wired in `main.py` lifespan (Session C).
+- [~] Simple digest page in Admin UI — **BACKEND LANDED** in Session C: 5 endpoints (`GET /digest/today`, `GET /digest/today/markdown`, `GET /digest/{YYYY-MM-DD}`, `GET /digest/{YYYY-MM-DD}/markdown`, `POST /digest/generate` env-gated by `ALLOW_ONDEMAND_DIGEST`). **UI page DEFERRED** to C-frontend session because `admin_ui/` was empty (prior handoff falsely claimed it was scaffolded). Next session: ADR-0010 (Next.js App Router + Tailwind + shadcn stack) + full scaffold + `/digest` page.
+- [x] Test: full flow from cron trigger → LLM → digest email/UI — `tests/integration/test_digest_flow.py` (46 tests) covers endpoint contract, env-gate boundary, tz resolution, missing-file 404s. Live path exercised manually via `make demo-digest` per ADR-0008 §2. Email delivery remains Phase 3+ scope (L6 comms adapter).
+
+### Phase 2 status: BACKEND CLOSED (Session C, 2026-07-07). Awaiting admin UI `/digest` page from C-frontend session before declaring full Phase 2 close. Phase 3 does NOT start until the UI closes Phase 2 — no leaking scope.
 
 ## Phase 3 — Week 3: Remaining 7 L6 Adapters + L4 Orchestrator + Telemetry
 
